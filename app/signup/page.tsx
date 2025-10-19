@@ -166,7 +166,7 @@ export default function SignUpPage() {
             
             <Button 
               type="submit" 
-              className="w-full" 
+              className="w-full !bg-blue-600 !text-white hover:!bg-blue-700 disabled:!bg-blue-400 disabled:!text-white" 
               disabled={loading}
               variant="primary"
             >
