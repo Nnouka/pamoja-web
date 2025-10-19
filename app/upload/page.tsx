@@ -116,10 +116,10 @@ function UploadContent() {
               fileUrl: downloadURL,
               fileName: selectedFile.name,
               fileType: getFileType(selectedFile),
-              subject: subject || undefined,
               tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
               createdAt: Timestamp.now(),
               updatedAt: Timestamp.now(),
+              ...(subject && { subject }), // Only include subject if it has a value
             };
 
             console.log('Saving note to Firestore:', noteData);
@@ -135,10 +135,10 @@ function UploadContent() {
               const challengesResponse = await generateChallenges({
                 content,
                 fileType: getFileType(selectedFile),
-                subject: subject || undefined,
                 tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
                 difficulty: 'medium',
-                count: 5
+                count: 5,
+                ...(subject && { subject }), // Only include subject if it has a value
               });
 
               console.log('Challenges generated:', challengesResponse.challenges.length);
@@ -199,10 +199,10 @@ function UploadContent() {
         title,
         content: markdownContent, // Store markdown content directly
         fileType: 'text',
-        subject: subject || undefined,
         tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
+        ...(subject && { subject }), // Only include subject if it has a value
       };
 
       console.log('Saving markdown note to Firestore:', noteData);
@@ -216,10 +216,10 @@ function UploadContent() {
         const challengesResponse = await generateChallenges({
           content: markdownContent,
           fileType: 'text',
-          subject: subject || undefined,
           tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
           difficulty: 'medium',
-          count: 5
+          count: 5,
+          ...(subject && { subject }), // Only include subject if it has a value
         });
 
         console.log('Challenges generated:', challengesResponse.challenges.length);
