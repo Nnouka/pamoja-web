@@ -13,6 +13,7 @@ import { storage, db } from '@/lib/firebase';
 import { Note } from '@/lib/types';
 import { generateChallenges, extractContentFromFile } from '@/lib/ai-utils';
 import Link from 'next/link';
+const pdfParse = require('pdf-parse');
 
 function UploadContent() {
   const { currentUser, userProfile } = useAuth();
@@ -26,7 +27,42 @@ function UploadContent() {
   const [activeTab, setActiveTab] = useState<'upload' | 'write'>('upload');
   const [markdownContent, setMarkdownContent] = useState('');
 
-  const handleFileSelect = (file: File) => {
+  const validatePdfPages = async (file: File): Promise<boolean> => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfData = await pdfParse(arrayBuffer);
+      const pageCount = pdfData.numpages;
+      
+      if (pageCount > 3) {
+        alert(`PDF has too many pages! Please select a PDF with 3 pages or less. Current pages: ${pageCount}`);
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error validating PDF:', error);
+      alert('Error reading PDF file. Please try again.');
+      return false;
+    }
+  };
+
+  const handleFileSelect = async (file: File) => {
+    // File size limit: 10MB
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+    
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`File size too large! Please select a file smaller than 10MB. Current size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+      return;
+    }
+    
+    // Validate PDF page count
+    if (file.type.toLowerCase().includes('pdf')) {
+      const isValidPdf = await validatePdfPages(file);
+      if (!isValidPdf) {
+        return;
+      }
+    }
+    
     setSelectedFile(file);
     if (!title) {
       setTitle(file.name.replace(/\.[^/.]+$/, "")); // Remove file extension
@@ -43,13 +79,13 @@ function UploadContent() {
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
     
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelect(e.dataTransfer.files[0]);
+      await handleFileSelect(e.dataTransfer.files[0]);
     }
   };
 
@@ -355,9 +391,9 @@ function UploadContent() {
                           type="file"
                           className="hidden"
                           accept=".pdf,.txt,.doc,.docx,.mp3,.wav,.m4a,.jpg,.jpeg,.png"
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             if (e.target.files && e.target.files[0]) {
-                              handleFileSelect(e.target.files[0]);
+                              await handleFileSelect(e.target.files[0]);
                             }
                           }}
                         />

@@ -13,6 +13,7 @@ import {
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { auth, db, googleProvider } from '@/lib/firebase';
 import { User } from '@/lib/types';
+import { validateUserStreak } from '@/lib/database';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -70,12 +71,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUserProfile(newUserProfile);
     } else {
       console.log('User profile exists, updating last activity for:', userId);
+      // Validate streak before updating profile
+      await validateUserStreak(userId);
+      
+      // Get the updated profile after potential streak reset
+      const updatedUserDoc = await getDoc(userRef);
+      const existingProfile = updatedUserDoc.data() as User;
+      
       // Update last activity
-      const existingProfile = userDoc.data() as User;
       await updateDoc(userRef, {
         lastActivity: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
+      
       const updatedProfile = {
         ...existingProfile,
         id: userId, // Ensure the id is set correctly

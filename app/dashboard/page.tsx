@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { ProtectedRoute } from '@/components/protected-route';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trophy, Target, Flame, Upload, BookOpen, Play } from 'lucide-react';
+import { Trophy, Target, Flame, Upload, BookOpen, Play, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { getUserNotes, getUserChallenges, getUserDueChallenges } from '@/lib/database';
@@ -70,6 +70,12 @@ function DashboardContent() {
                 <Button variant="outline">
                   <BookOpen className="mr-2 h-4 w-4" />
                   My Notes
+                </Button>
+              </Link>
+              <Link href="/history">
+                <Button variant="outline">
+                  <Clock className="mr-2 h-4 w-4" />
+                  History
                 </Button>
               </Link>
               <Link href="/leaderboard">

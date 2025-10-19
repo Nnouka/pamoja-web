@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 interface GenerateChallengesRequest {
   content: string;
@@ -14,80 +19,133 @@ export async function POST(request: NextRequest) {
     const body: GenerateChallengesRequest = await request.json();
     const { content, fileType, subject, tags, difficulty = 'medium', count = 5 } = body;
 
-    // In a real implementation, you would use OpenAI API here
-    // For now, we'll create sample challenges based on the input
-    
-    const challenges = [];
-    
-    for (let i = 0; i < count; i++) {
-      // Generate different types of challenges
-      const types = ['multiple-choice', 'short-answer', 'true-false', 'fill-blank'] as const;
-      const type = types[i % types.length];
-      
-      let challenge;
-      
-      switch (type) {
-        case 'multiple-choice':
-          challenge = {
-            type: 'multiple-choice' as const,
-            question: `Which of the following best describes the main concept in this ${fileType} content${subject ? ` about ${subject}` : ''}?`,
-            options: [
-              'Concept A - Primary definition and explanation',
-              'Concept B - Secondary but important detail',
-              'Concept C - Related but not central idea',
-              'Concept D - Unrelated information'
-            ],
-            correctAnswer: 'Concept A - Primary definition and explanation',
-            explanation: `The correct answer focuses on the main theme discussed in the uploaded content. ${tags.length > 0 ? `Key tags: ${tags.join(', ')}` : ''}`,
-            difficulty
-          };
-          break;
-          
-        case 'true-false':
-          challenge = {
-            type: 'true-false' as const,
-            question: `True or False: The uploaded content primarily discusses ${subject || 'the main topic'} in detail.`,
-            correctAnswer: 'True',
-            explanation: 'Based on the content analysis, this statement accurately reflects the material.',
-            difficulty
-          };
-          break;
-          
-        case 'short-answer':
-          challenge = {
-            type: 'short-answer' as const,
-            question: `Briefly explain the key takeaway from this ${fileType} content.`,
-            correctAnswer: `The key takeaway involves understanding the fundamental concepts${subject ? ` of ${subject}` : ''} as presented in the material.`,
-            explanation: 'A good answer should capture the essence of the content and demonstrate comprehension.',
-            difficulty
-          };
-          break;
-          
-        case 'fill-blank':
-          challenge = {
-            type: 'fill-blank' as const,
-            question: `Complete this statement: "The main purpose of this content is to _____ the reader about ${subject || 'the topic'}.`,
-            correctAnswer: 'educate',
-            explanation: 'Educational content typically aims to inform, teach, or educate the audience.',
-            difficulty
-          };
-          break;
-      }
-      
-      challenges.push(challenge);
+    // Validate content
+    if (!content || content.trim().length < 10) {
+      return NextResponse.json(
+        { error: 'Content is too short to generate meaningful challenges' },
+        { status: 400 }
+      );
     }
 
+    // Limit challenge count to maximum of 10
+    const maxChallenges = 10;
+    const challengeCount = Math.min(count, maxChallenges);
+    
+    if (count > maxChallenges) {
+      console.log(`Challenge count requested (${count}) exceeds maximum (${maxChallenges}). Limiting to ${maxChallenges}.`);
+    }
+
+    // Create a comprehensive prompt for OpenAI
+    const systemPrompt = `You are an expert educational content creator who generates high-quality learning challenges from study materials. Your challenges should be:
+
+1. Directly based on the provided content
+2. Appropriate for the specified difficulty level
+3. Educational and thought-provoking
+4. Clear and unambiguous
+5. Include helpful explanations
+
+Generate a mix of question types: multiple-choice, true-false, short-answer, and fill-in-the-blank.`;
+
+    const userPrompt = `Based on the following ${fileType} content, generate exactly ${challengeCount} educational challenges at ${difficulty} difficulty level.
+
+${subject ? `Subject: ${subject}` : ''}
+${tags.length > 0 ? `Tags: ${tags.join(', ')}` : ''}
+
+Content:
+${content}
+
+Requirements:
+- Generate exactly ${challengeCount} challenges
+- Use a mix of question types: multiple-choice (4 options), true-false, short-answer, fill-in-the-blank
+- Each challenge should test understanding of specific concepts from the content
+- Provide clear explanations for each answer
+- Make questions specific to the actual content provided
+
+Format your response as valid JSON with this exact structure:
+{
+  "challenges": [
+    {
+      "type": "multiple-choice",
+      "question": "Question text here",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswer": "A",
+      "explanation": "Explanation here",
+      "difficulty": "${difficulty}"
+    },
+    {
+      "type": "true-false", 
+      "question": "Statement to evaluate",
+      "correctAnswer": "True",
+      "explanation": "Explanation here",
+      "difficulty": "${difficulty}"
+    }
+  ]
+}`;
+
+    console.log('Calling OpenAI API for challenge generation...');
+    
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // Using the more cost-effective model
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user", 
+          content: userPrompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 2500,
+      response_format: { type: "json_object" }
+    });
+
+    const aiResponse = response.choices[0].message.content;
+    if (!aiResponse) {
+      throw new Error('No response from OpenAI');
+    }
+
+    console.log('OpenAI response received:', aiResponse.slice(0, 200) + '...');
+    
+    const result = JSON.parse(aiResponse);
+    
+    // Validate the response structure
+    if (!result.challenges || !Array.isArray(result.challenges)) {
+      throw new Error('Invalid response format from OpenAI');
+    }
+
+    // Ensure we have the right number of challenges
+    if (result.challenges.length === 0) {
+      throw new Error('No challenges generated by OpenAI');
+    }
+
+    console.log(`Successfully generated ${result.challenges.length} challenges`);
+    
     return NextResponse.json({
-      challenges,
-      message: 'Challenges generated successfully'
+      challenges: result.challenges,
+      message: `Generated ${result.challenges.length} AI-powered challenges successfully`
     });
 
   } catch (error) {
-    console.error('Error generating challenges:', error);
+    console.error('Error generating challenges with OpenAI:', error);
+    
+    // Fallback to basic challenges if OpenAI fails
+    const fallbackChallenges = [{
+      type: 'short-answer' as const,
+      question: 'What are the key concepts discussed in this content?',
+      correctAnswer: 'The key concepts include the main ideas and important details presented in the uploaded material.',
+      explanation: 'This is a fallback question generated when AI processing is unavailable.',
+      difficulty: 'medium' as const
+    }];
     
     return NextResponse.json(
-      { error: 'Failed to generate challenges' },
-      { status: 500 }
+      { 
+        challenges: fallbackChallenges,
+        message: 'Generated fallback challenges (AI service temporarily unavailable)',
+        warning: 'Using fallback mode - please try again later for AI-generated challenges'
+      },
+      { status: 200 }
     );
   }
 }

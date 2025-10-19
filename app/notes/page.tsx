@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { FileText, Headphones, Image as ImageIcon, ArrowLeft, Plus, Calendar, Tag, Trash2, Eye, X, Edit, List, RefreshCw } from 'lucide-react';
 import { getUserNotes, deleteNote, getUserChallenges, updateNote } from '@/lib/database';
 import { generateChallenges, extractContentFromFile } from '@/lib/ai-utils';
-import { createChallenge } from '@/lib/database';
+import { createChallenge, getActiveChallengesForNote } from '@/lib/database';
 import { Note, Challenge } from '@/lib/types';
 import { Timestamp } from 'firebase/firestore';
 import Link from 'next/link';
@@ -75,6 +75,21 @@ function NotesContent() {
     setGeneratingChallenges(note.id);
     
     try {
+      // Check for existing active challenges
+      const activeChallenges = await getActiveChallengesForNote(note.id, userProfile.id);
+      
+      if (activeChallenges.length > 0) {
+        const proceedWithNew = confirm(
+          `This note already has ${activeChallenges.length} active challenge(s) that are not completed. ` +
+          `Creating new challenges will replace the existing ones. Do you want to proceed?`
+        );
+        
+        if (!proceedWithNew) {
+          setGeneratingChallenges(null);
+          return;
+        }
+      }
+      
       // For demo purposes, we'll use the note title and content
       const content = note.content || `Content from file: ${note.fileName}`;
       

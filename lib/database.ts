@@ -28,6 +28,114 @@ export const updateUserProfile = async (userId: string, updates: Partial<User>) 
   });
 };
 
+// Calculate and update user streak
+export const updateUserStreak = async (userId: string) => {
+  const user = await getUserById(userId);
+  if (!user) return;
+
+  const today = new Date().toISOString().split('T')[0];
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  
+  // Get today's progress
+  const todayProgress = await getTodayProgress(userId);
+  
+  // Only proceed if user actually completed challenges today
+  if (!todayProgress || todayProgress.challengesCompleted === 0) {
+    return user.streak;
+  }
+
+  // Check if today's progress already marked as streak active (prevent double counting)
+  if (todayProgress.streakActive) {
+    return user.streak;
+  }
+  
+  // Get yesterday's progress
+  const yesterdayProgressQuery = query(
+    collection(db, 'dailyProgress'),
+    where('userId', '==', userId),
+    where('date', '==', yesterday)
+  );
+  const yesterdaySnapshot = await getDocs(yesterdayProgressQuery);
+  const hadYesterdayActivity = !yesterdaySnapshot.empty && 
+    (yesterdaySnapshot.docs[0].data() as DailyProgress).challengesCompleted > 0;
+
+  let newStreak: number;
+  
+  if (hadYesterdayActivity) {
+    // Had activity yesterday, increment streak
+    newStreak = user.streak + 1;
+    console.log(`User ${userId} continuing streak: ${user.streak} -> ${newStreak}`);
+  } else if (user.streak === 0) {
+    // Starting first day of streak
+    newStreak = 1;
+    console.log(`User ${userId} starting new streak: ${newStreak}`);
+  } else {
+    // No activity yesterday but had a streak - check if grace period applies
+    const lastActivityDate = user.lastActivity?.toDate();
+    const daysSinceLastActivity = lastActivityDate ? 
+      Math.floor((Date.now() - lastActivityDate.getTime()) / (24 * 60 * 60 * 1000)) : 999;
+    
+    if (daysSinceLastActivity <= 2) {
+      // Within grace period, start new streak
+      newStreak = 1;
+      console.log(`User ${userId} restarting streak after ${daysSinceLastActivity} days: ${newStreak}`);
+    } else {
+      // Too much time passed, reset
+      newStreak = 1;
+      console.log(`User ${userId} streak reset and restarted: ${newStreak}`);
+    }
+  }
+  
+  // Update user with new streak
+  await updateUserProfile(userId, { 
+    streak: newStreak,
+    lastActivity: Timestamp.now()
+  });
+  
+  // Mark today's progress as streak active to prevent double counting
+  await updateDailyProgress(userId, { streakActive: true });
+  
+  console.log(`User ${userId} streak updated to: ${newStreak}`);
+  return newStreak;
+};
+
+// Validate and potentially reset user streak on login
+export const validateUserStreak = async (userId: string) => {
+  const user = await getUserById(userId);
+  if (!user) return;
+
+  const today = new Date().toISOString().split('T')[0];
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  
+  // Get yesterday's progress to check if streak should continue
+  const yesterdayProgressQuery = query(
+    collection(db, 'dailyProgress'),
+    where('userId', '==', userId),
+    where('date', '==', yesterday)
+  );
+  const yesterdaySnapshot = await getDocs(yesterdayProgressQuery);
+  const hadYesterdayActivity = !yesterdaySnapshot.empty && 
+    (yesterdaySnapshot.docs[0].data() as DailyProgress).challengesCompleted > 0;
+
+  // Check if we need to reset streak
+  const lastActivityDate = user.lastActivity?.toDate();
+  if (lastActivityDate) {
+    const daysSinceLastActivity = Math.floor((Date.now() - lastActivityDate.getTime()) / (24 * 60 * 60 * 1000));
+    
+    // Reset streak if:
+    // 1. More than 2 days since last activity, OR
+    // 2. Exactly 1 day since last activity but no challenges completed yesterday
+    if ((daysSinceLastActivity > 2) || (daysSinceLastActivity === 2 && !hadYesterdayActivity)) {
+      if (user.streak > 0) {
+        await updateUserProfile(userId, { streak: 0 });
+        console.log(`User ${userId} streak reset due to missing daily activity`);
+      }
+    }
+  }
+  
+  return user;
+};
+
 // Note operations
 export const getUserNotes = async (userId: string): Promise<Note[]> => {
   console.log('getUserNotes called for userId:', userId);
@@ -91,6 +199,47 @@ export const getChallengesForNote = async (noteId: string): Promise<Challenge[]>
   })) as Challenge[];
 };
 
+export const getActiveChallengesForNote = async (noteId: string, userId: string): Promise<Challenge[]> => {
+  const challengesQuery = query(
+    collection(db, 'challenges'),
+    where('noteId', '==', noteId),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  
+  const challengesSnapshot = await getDocs(challengesQuery);
+  const challenges = challengesSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  })) as Challenge[];
+  
+  // Get progress for all challenges to determine active ones
+  const activeChallenges = [];
+  
+  for (const challenge of challenges) {
+    const progressQuery = query(
+      collection(db, 'challengeProgress'),
+      where('challengeId', '==', challenge.id),
+      where('userId', '==', userId)
+    );
+    
+    const progressSnapshot = await getDocs(progressQuery);
+    
+    // If no progress exists, challenge is not started (active)
+    // If progress exists but not completed, challenge is in progress (active)
+    if (progressSnapshot.empty) {
+      activeChallenges.push(challenge);
+    } else {
+      const progress = progressSnapshot.docs[0].data() as ChallengeProgress;
+      if (!progress.mastered) {
+        activeChallenges.push(challenge);
+      }
+    }
+  }
+  
+  return activeChallenges;
+};
+
 export const getUserChallenges = async (userId: string, limitCount: number = 10): Promise<Challenge[]> => {
   const challengesQuery = query(
     collection(db, 'challenges'),
@@ -131,6 +280,82 @@ export const updateChallengeProgress = async (progressId: string, updates: Parti
     ...updates,
     updatedAt: Timestamp.now(),
   });
+};
+
+// Get user's challenge history with attempts
+export const getUserChallengeHistory = async (userId: string): Promise<(Challenge & { progress?: ChallengeProgress })[]> => {
+  // Get all user's challenges
+  const userChallenges = await getUserChallenges(userId);
+  
+  // Get all challenge progress for user
+  const progressQuery = query(
+    collection(db, 'challengeProgress'),
+    where('userId', '==', userId),
+    orderBy('updatedAt', 'desc')
+  );
+  
+  const progressSnapshot = await getDocs(progressQuery);
+  const progressMap = new Map<string, ChallengeProgress>();
+  
+  progressSnapshot.docs.forEach(doc => {
+    const progress = { id: doc.id, ...doc.data() } as ChallengeProgress;
+    progressMap.set(progress.challengeId, progress);
+  });
+  
+  // Combine challenges with their progress, only return challenges that have been attempted
+  const challengeHistory = userChallenges
+    .map(challenge => ({
+      ...challenge,
+      progress: progressMap.get(challenge.id)
+    }))
+    .filter(challenge => challenge.progress && challenge.progress.attempts.length > 0)
+    .sort((a, b) => {
+      const aLastAttempt = a.progress?.attempts[a.progress.attempts.length - 1]?.timestamp;
+      const bLastAttempt = b.progress?.attempts[b.progress.attempts.length - 1]?.timestamp;
+      return (bLastAttempt?.toMillis() || 0) - (aLastAttempt?.toMillis() || 0);
+    });
+  
+  return challengeHistory;
+};
+
+// Get user's challenge history grouped by notes
+export const getUserChallengeHistoryByNotes = async (userId: string): Promise<{ [noteId: string]: { note: Note; challenges: (Challenge & { progress?: ChallengeProgress })[] } }> => {
+  // Get challenge history
+  const challengeHistory = await getUserChallengeHistory(userId);
+  
+  // Get all user notes
+  const userNotes = await getUserNotes(userId);
+  const notesMap = new Map<string, Note>();
+  userNotes.forEach(note => notesMap.set(note.id, note));
+  
+  // Group challenges by note
+  const groupedHistory: { [noteId: string]: { note: Note; challenges: (Challenge & { progress?: ChallengeProgress })[] } } = {};
+  
+  challengeHistory.forEach(challenge => {
+    const noteId = challenge.noteId;
+    const note = notesMap.get(noteId);
+    
+    if (note) {
+      if (!groupedHistory[noteId]) {
+        groupedHistory[noteId] = {
+          note,
+          challenges: []
+        };
+      }
+      groupedHistory[noteId].challenges.push(challenge);
+    }
+  });
+  
+  // Sort challenges within each note by most recent attempt
+  Object.values(groupedHistory).forEach(group => {
+    group.challenges.sort((a, b) => {
+      const aLastAttempt = a.progress?.attempts[a.progress.attempts.length - 1]?.timestamp;
+      const bLastAttempt = b.progress?.attempts[b.progress.attempts.length - 1]?.timestamp;
+      return (bLastAttempt?.toMillis() || 0) - (aLastAttempt?.toMillis() || 0);
+    });
+  });
+  
+  return groupedHistory;
 };
 
 export const getUserDueChallenges = async (userId: string): Promise<(Challenge & { progress?: ChallengeProgress })[]> => {

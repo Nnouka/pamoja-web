@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { collection, getDocs, query, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { updateUserStreak, validateUserStreak, getTodayProgress } from '@/lib/database';
 
 export default function DebugPage() {
   const { currentUser, userProfile } = useAuth();
@@ -84,6 +85,50 @@ export default function DebugPage() {
     }
   };
 
+  const testStreaks = async () => {
+    if (!currentUser?.uid) return;
+    
+    setLoading(true);
+    setDebugInfo('Testing streak functionality...\n');
+
+    try {
+      const userId = currentUser.uid;
+      
+      // Check current streak state
+      setDebugInfo(prev => prev + `Current streak: ${userProfile?.streak || 0}\n`);
+      setDebugInfo(prev => prev + `Last activity: ${userProfile?.lastActivity?.toDate()?.toISOString() || 'Never'}\n\n`);
+      
+      // Check today's progress
+      const todayProgress = await getTodayProgress(userId);
+      setDebugInfo(prev => prev + `Today's progress:\n`);
+      if (todayProgress) {
+        setDebugInfo(prev => prev + `  - Challenges completed: ${todayProgress.challengesCompleted}\n`);
+        setDebugInfo(prev => prev + `  - Streak active: ${todayProgress.streakActive}\n`);
+        setDebugInfo(prev => prev + `  - Date: ${todayProgress.date}\n\n`);
+      } else {
+        setDebugInfo(prev => prev + `  - No progress recorded for today\n\n`);
+      }
+      
+      // Validate streak
+      setDebugInfo(prev => prev + 'Running streak validation...\n');
+      await validateUserStreak(userId);
+      setDebugInfo(prev => prev + 'Streak validation completed\n\n');
+      
+      // Try to update streak (will only work if user has completed challenges today)
+      setDebugInfo(prev => prev + 'Attempting streak update...\n');
+      const newStreak = await updateUserStreak(userId);
+      setDebugInfo(prev => prev + `Streak after update: ${newStreak}\n\n`);
+      
+      setDebugInfo(prev => prev + 'Check browser console for detailed logs\n');
+      
+    } catch (error: any) {
+      console.error('Streak test error:', error);
+      setDebugInfo(prev => prev + `\nERROR: ${error.message}\n`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <Card className="max-w-4xl mx-auto">
@@ -94,9 +139,14 @@ export default function DebugPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button onClick={checkDatabase} disabled={loading}>
-            {loading ? 'Checking...' : 'Check Database'}
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={checkDatabase} disabled={loading}>
+              {loading ? 'Checking...' : 'Check Database'}
+            </Button>
+            <Button onClick={testStreaks} disabled={loading} variant="outline">
+              {loading ? 'Testing...' : 'Test Streaks'}
+            </Button>
+          </div>
           
           {debugInfo && (
             <div className="bg-gray-100 p-4 rounded font-mono text-sm whitespace-pre-wrap max-h-96 overflow-y-auto">

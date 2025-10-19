@@ -13,7 +13,8 @@ import {
   createChallengeProgress, 
   updateChallengeProgress,
   updateUserProfile,
-  updateDailyProgress 
+  updateDailyProgress,
+  updateUserStreak 
 } from '@/lib/database';
 import { 
   calculateNextReview, 
@@ -37,6 +38,8 @@ function ChallengesContent() {
   const [selectedOption, setSelectedOption] = useState('');
   const [showResult, setShowResult] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
+  const [showCompletion, setShowCompletion] = useState(false);
+  const [completionStats, setCompletionStats] = useState({ correct: 0, total: 0, xpEarned: 0 });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [sessionStats, setSessionStats] = useState({
@@ -84,14 +87,27 @@ function ChallengesContent() {
       // Determine correct answer based on challenge type
       let correctAnswer = currentChallenge.correctAnswer;
       let userAnswerText = '';
+      let correct = false;
       
       if (currentChallenge.type === 'multiple-choice') {
         userAnswerText = selectedOption;
+        
+        // Handle different correctAnswer formats
+        // Case 1: correctAnswer is just the letter (e.g., "B")
+        // Case 2: correctAnswer is the full option text (e.g., "B. Python")
+        if (correctAnswer.length <= 2) {
+          // correctAnswer is just a letter (A, B, C, D)
+          const selectedLetter = selectedOption.charAt(0);
+          correct = selectedLetter.toLowerCase() === correctAnswer.toLowerCase();
+        } else {
+          // correctAnswer is the full option text
+          correct = userAnswerText.toLowerCase() === correctAnswer.toLowerCase();
+        }
       } else {
         userAnswerText = userAnswer.trim();
+        correct = userAnswerText.toLowerCase() === correctAnswer.toLowerCase();
       }
       
-      const correct = userAnswerText.toLowerCase() === correctAnswer.toLowerCase();
       setIsCorrect(correct);
       
       // Create attempt record
@@ -176,6 +192,9 @@ function ChallengesContent() {
         xpEarned: sessionStats.xpEarned + (correct ? xpReward : 0)
       });
 
+      // Update user streak
+      await updateUserStreak(currentUser.uid);
+
       setSessionStats(prev => ({
         answered: prev.answered + 1,
         correct: prev.correct + (correct ? 1 : 0),
@@ -202,11 +221,16 @@ function ChallengesContent() {
       setCurrentChallengeIndex(prev => prev + 1);
     } else {
       // Session complete
-      alert(`Session complete! You answered ${sessionStats.correct + (isCorrect ? 1 : 0)} out of ${sessionStats.answered + 1} questions correctly and earned ${sessionStats.xpEarned + (isCorrect ? calculateXPReward(isCorrect, currentChallenge.difficulty) : 0)} XP!`);
-      // Could redirect to dashboard or reload challenges
-      loadChallenges();
-      setCurrentChallengeIndex(0);
-      setSessionStats({ answered: 0, correct: 0, xpEarned: 0 });
+      const finalCorrect = sessionStats.correct + (isCorrect ? 1 : 0);
+      const finalTotal = sessionStats.answered + 1;
+      const finalXP = sessionStats.xpEarned + (isCorrect ? calculateXPReward(isCorrect, currentChallenge.difficulty) : 0);
+      
+      setCompletionStats({
+        correct: finalCorrect,
+        total: finalTotal,
+        xpEarned: finalXP
+      });
+      setShowCompletion(true);
     }
   };
 
@@ -304,14 +328,22 @@ function ChallengesContent() {
       <div className="min-h-screen bg-gray-50">
         <header className="bg-white shadow-sm border-b">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center py-4">
-              <Link href="/dashboard" className="mr-4">
-                <Button variant="ghost" size="sm">
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back to Dashboard
+            <div className="flex items-center justify-between py-4">
+              <div className="flex items-center">
+                <Link href="/dashboard" className="mr-4">
+                  <Button variant="ghost" size="sm">
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back to Dashboard
+                  </Button>
+                </Link>
+                <h1 className="text-2xl font-bold text-gray-900">Practice Challenges</h1>
+              </div>
+              <Link href="/history">
+                <Button variant="outline" size="sm">
+                  <Clock className="h-4 w-4 mr-2" />
+                  View History
                 </Button>
               </Link>
-              <h1 className="text-2xl font-bold text-gray-900">Practice Challenges</h1>
             </div>
           </div>
         </header>
@@ -359,6 +391,12 @@ function ChallengesContent() {
                 <Trophy className="h-4 w-4 mr-1" />
                 {sessionStats.xpEarned} XP
               </div>
+              <Link href="/history">
+                <Button variant="outline" size="sm">
+                  <Clock className="h-4 w-4 mr-2" />
+                  History
+                </Button>
+              </Link>
             </div>
           </div>
         </div>
@@ -414,7 +452,19 @@ function ChallengesContent() {
                     
                     {!isCorrect && (
                       <p className="text-sm text-gray-700 mb-2">
-                        <strong>Correct answer:</strong> {currentChallenge.correctAnswer}
+                        <strong>Correct answer:</strong> {
+                          currentChallenge.type === 'multiple-choice' && 
+                          currentChallenge.options && 
+                          currentChallenge.correctAnswer.length <= 2 ? (
+                            // Find and display the full option text for letter-based correct answers
+                            (() => {
+                              const correctIndex = currentChallenge.correctAnswer.charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
+                              return currentChallenge.options[correctIndex] || currentChallenge.correctAnswer;
+                            })()
+                          ) : (
+                            currentChallenge.correctAnswer
+                          )
+                        }
                       </p>
                     )}
                     
@@ -447,6 +497,62 @@ function ChallengesContent() {
           </Card>
         )}
       </main>
+
+      {/* Session Completion Modal */}
+      {showCompletion && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <div className="text-center">
+              <Trophy className="h-16 w-16 text-yellow-500 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Session Complete!</h2>
+              <p className="text-gray-600 mb-6">
+                Great job! You've finished all your due challenges.
+              </p>
+              
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-blue-600">{completionStats.correct}</div>
+                  <div className="text-sm text-gray-500">Correct</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-gray-600">{completionStats.total}</div>
+                  <div className="text-sm text-gray-500">Total</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-yellow-600">{completionStats.xpEarned}</div>
+                  <div className="text-sm text-gray-500">XP Earned</div>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <Link href="/history" className="block">
+                  <Button className="w-full !bg-blue-600 !text-white hover:!bg-blue-700">
+                    <Clock className="h-4 w-4 mr-2" />
+                    View Challenge History
+                  </Button>
+                </Link>
+                <Link href="/dashboard" className="block">
+                  <Button variant="outline" className="w-full">
+                    Back to Dashboard
+                  </Button>
+                </Link>
+                <Button 
+                  variant="ghost" 
+                  className="w-full"
+                  onClick={() => {
+                    setShowCompletion(false);
+                    loadChallenges();
+                    setCurrentChallengeIndex(0);
+                    setSessionStats({ answered: 0, correct: 0, xpEarned: 0 });
+                  }}
+                >
+                  Try More Challenges
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
