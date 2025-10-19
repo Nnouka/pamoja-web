@@ -6,7 +6,7 @@ import { ProtectedRoute } from '@/components/protected-route';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, FileText, Headphones, Image as ImageIcon, ArrowLeft } from 'lucide-react';
+import { Upload, FileText, Headphones, Image as ImageIcon, ArrowLeft, Edit, File } from 'lucide-react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import { storage, db } from '@/lib/firebase';
@@ -15,7 +15,7 @@ import { generateChallenges, extractContentFromFile } from '@/lib/ai-utils';
 import Link from 'next/link';
 
 function UploadContent() {
-  const { userProfile } = useAuth();
+  const { currentUser, userProfile } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -23,6 +23,8 @@ function UploadContent() {
   const [subject, setSubject] = useState('');
   const [tags, setTags] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [activeTab, setActiveTab] = useState<'upload' | 'write'>('upload');
+  const [markdownContent, setMarkdownContent] = useState('');
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
@@ -181,6 +183,80 @@ function UploadContent() {
     }
   };
 
+  const saveMarkdownNote = async () => {
+    if (!markdownContent || !title || !currentUser?.uid) {
+      return;
+    }
+
+    setUploading(true);
+
+    try {
+      console.log('Saving markdown note for user:', currentUser.uid);
+
+      // Create note document in Firestore (no file upload needed for markdown)
+      const noteData: Omit<Note, 'id'> = {
+        userId: currentUser.uid,
+        title,
+        content: markdownContent, // Store markdown content directly
+        fileType: 'text',
+        subject: subject || undefined,
+        tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+
+      console.log('Saving markdown note to Firestore:', noteData);
+      const noteRef = await addDoc(collection(db, 'notes'), noteData);
+      console.log('Markdown note saved successfully with ID:', noteRef.id);
+      
+      // Generate challenges from markdown content
+      try {
+        console.log('Generating challenges from markdown content...');
+        
+        const challengesResponse = await generateChallenges({
+          content: markdownContent,
+          fileType: 'text',
+          subject: subject || undefined,
+          tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
+          difficulty: 'medium',
+          count: 5
+        });
+
+        console.log('Challenges generated:', challengesResponse.challenges.length);
+
+        // Save challenges to database
+        for (const challengeData of challengesResponse.challenges) {
+          console.log('Saving challenge:', challengeData);
+          const challengeRef = await addDoc(collection(db, 'challenges'), {
+            noteId: noteRef.id,
+            userId: currentUser.uid,
+            ...challengeData,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+          });
+          console.log('Challenge saved with ID:', challengeRef.id);
+        }
+
+      } catch (challengeError) {
+        console.error('Error generating challenges:', challengeError);
+        alert('Note saved but failed to generate challenges. You can generate them later.');
+      }
+
+      // Reset form
+      setMarkdownContent('');
+      setTitle('');
+      setSubject('');
+      setTags('');
+      setUploading(false);
+      
+      alert('Markdown note saved and challenges generated successfully!');
+    } catch (error) {
+      console.error('Error saving markdown note:', error);
+      alert('Error saving note: ' + (error as Error).message);
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -193,20 +269,52 @@ function UploadContent() {
                 Back to Dashboard
               </Button>
             </Link>
-            <h1 className="text-2xl font-bold text-gray-900">Upload Learning Materials</h1>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {activeTab === 'upload' ? 'Upload Learning Materials' : 'Write Your Notes'}
+            </h1>
           </div>
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Upload Area */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle>Upload Your Content</CardTitle>
-            <CardDescription>
-              Upload notes, slides, PDFs, or voice recordings to create AI-powered challenges
-            </CardDescription>
-          </CardHeader>
+        {/* Tab Navigation */}
+        <div className="mb-8">
+          <div className="flex space-x-1 rounded-lg bg-gray-100 p-1">
+            <button
+              onClick={() => setActiveTab('upload')}
+              className={`flex-1 flex items-center justify-center px-3 py-2 text-sm font-medium rounded-md transition-all ${
+                activeTab === 'upload'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              Upload File
+            </button>
+            <button
+              onClick={() => setActiveTab('write')}
+              className={`flex-1 flex items-center justify-center px-3 py-2 text-sm font-medium rounded-md transition-all ${
+                activeTab === 'write'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Edit className="w-4 h-4 mr-2" />
+              Write Notes
+            </button>
+          </div>
+        </div>
+
+        {activeTab === 'upload' && (
+          <>
+            {/* Upload Area */}
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle>Upload Your Content</CardTitle>
+                <CardDescription>
+                  Upload notes, slides, PDFs, or voice recordings to create AI-powered challenges
+                </CardDescription>
+              </CardHeader>
           <CardContent>
             <div
               className={`border-2 border-dashed rounded-lg p-8 text-center ${
@@ -340,6 +448,155 @@ function UploadContent() {
               </Button>
             </CardContent>
           </Card>
+        )}
+        </>
+        )}
+
+        {activeTab === 'write' && (
+          <>
+            {/* Markdown Editor */}
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle>Write Your Notes</CardTitle>
+                <CardDescription>
+                  Write your notes in markdown format to create AI-powered challenges
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="markdown-content" className="text-sm font-medium">
+                      Note Content (Markdown)
+                    </label>
+                    <textarea
+                      id="markdown-content"
+                      value={markdownContent}
+                      onChange={(e) => setMarkdownContent(e.target.value)}
+                      placeholder="# My Notes
+
+## Key Concepts
+- Point 1
+- Point 2
+
+### Important Formula
+```
+E = mc²
+```
+
+**Bold text** and *italic text*
+
+&gt; This is a quote or important note"
+                      className="w-full h-96 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y font-mono text-sm"
+                      required
+                    />
+                    <p className="text-xs text-gray-500">
+                      Use markdown formatting: **bold**, *italic*, # headers, - lists, &gt; quotes, etc.
+                    </p>
+                  </div>
+
+                  {/* Markdown Preview */}
+                  {markdownContent && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Preview</label>
+                      <div className="border rounded-md p-4 bg-gray-50 max-h-64 overflow-y-auto">
+                        <div 
+                          className="prose prose-sm max-w-none"
+                          dangerouslySetInnerHTML={{ 
+                            __html: markdownContent
+                              .replace(/^### (.*$)/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>')
+                              .replace(/^## (.*$)/gm, '<h2 class="text-xl font-semibold mt-4 mb-2">$1</h2>')
+                              .replace(/^# (.*$)/gm, '<h1 class="text-2xl font-bold mt-4 mb-3">$1</h1>')
+                              .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+                              .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+                              .replace(/^> (.*$)/gm, '<blockquote class="border-l-4 border-blue-300 pl-4 italic text-gray-700 my-2">$1</blockquote>')
+                              .replace(/^- (.*$)/gm, '<li class="ml-4">• $1</li>')
+                              .replace(/```([\s\S]*?)```/g, '<pre class="bg-gray-100 p-2 rounded text-sm font-mono overflow-x-auto"><code>$1</code></pre>')
+                              .replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 rounded text-sm font-mono">$1</code>')
+                              .replace(/\n\n/g, '</p><p class="mb-2">')
+                              .replace(/^/, '<p class="mb-2">')
+                              .replace(/$/, '</p>')
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Note Details Form for Markdown */}
+            {markdownContent && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Note Details</CardTitle>
+                  <CardDescription>
+                    Add information about your markdown notes
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="title-markdown" className="text-sm font-medium">
+                      Title *
+                    </label>
+                    <Input
+                      id="title-markdown"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Enter a title for this content"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="subject-markdown" className="text-sm font-medium">
+                      Subject (optional)
+                    </label>
+                    <Input
+                      id="subject-markdown"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      placeholder="e.g., Mathematics, Biology, History"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="tags-markdown" className="text-sm font-medium">
+                      Tags (optional)
+                    </label>
+                    <Input
+                      id="tags-markdown"
+                      value={tags}
+                      onChange={(e) => setTags(e.target.value)}
+                      placeholder="Enter tags separated by commas (e.g., algebra, equations, chapter-3)"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Tags help organize your content and improve AI challenge generation
+                    </p>
+                  </div>
+
+                  {uploading && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>Saving...</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className="bg-blue-600 h-2 rounded-full animate-pulse"></div>
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={saveMarkdownNote}
+                    disabled={!title || !markdownContent || uploading}
+                    className="w-full"
+                    variant="primary"
+                  >
+                    {uploading ? 'Saving...' : 'Save Notes & Create Challenges'}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </>
         )}
       </main>
     </div>

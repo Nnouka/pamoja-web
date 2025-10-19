@@ -14,27 +14,27 @@ import { Timestamp } from 'firebase/firestore';
 import Link from 'next/link';
 
 function NotesContent() {
-  const { userProfile } = useAuth();
+  const { currentUser, userProfile } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [generatingChallenges, setGeneratingChallenges] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log('Notes page useEffect - userProfile:', userProfile);
-    if (userProfile) {
-      console.log('User profile exists, loading notes for user ID:', userProfile.id);
+    console.log('Notes page useEffect - currentUser:', currentUser?.uid);
+    if (currentUser?.uid) {
+      console.log('User exists, loading notes for user ID:', currentUser.uid);
       loadNotes();
     } else {
-      console.log('No user profile available');
+      console.log('No user available');
     }
-  }, [userProfile]);
+  }, [currentUser?.uid]);
 
   const loadNotes = async () => {
-    if (!userProfile) return;
+    if (!currentUser?.uid) return;
     
     try {
-      console.log('Loading notes for user:', userProfile.id);
-      const userNotes = await getUserNotes(userProfile.id);
+      console.log('Loading notes for user:', currentUser.uid);
+      const userNotes = await getUserNotes(currentUser.uid);
       console.log('Notes loaded:', userNotes.length, userNotes);
       setNotes(userNotes);
     } catch (error) {
@@ -199,6 +199,20 @@ function NotesContent() {
                     {note.fileName && (
                       <div className="text-sm text-gray-600 truncate">
                         File: {note.fileName}
+                      </div>
+                    )}
+
+                    {note.content && !note.fileName && (
+                      <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded border-l-4 border-blue-200">
+                        <p className="font-medium text-gray-700 mb-1">Markdown Notes:</p>
+                        <div className="max-h-20 overflow-hidden">
+                          <pre className="whitespace-pre-wrap text-xs text-gray-600 leading-relaxed">
+                            {note.content.length > 150 
+                              ? note.content.substring(0, 150) + '...' 
+                              : note.content
+                            }
+                          </pre>
+                        </div>
                       </div>
                     )}
                     

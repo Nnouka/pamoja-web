@@ -6,11 +6,12 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   updateProfile
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, googleProvider } from '@/lib/firebase';
 import { User } from '@/lib/types';
 
 interface AuthContextType {
@@ -19,6 +20,7 @@ interface AuthContextType {
   loading: boolean;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -110,6 +112,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signInWithEmailAndPassword(auth, email, password);
   };
 
+  const signInWithGoogle = async () => {
+    try {
+      console.log('Attempting to sign in with Google...');
+      const result = await signInWithPopup(auth, googleProvider);
+      console.log('Google sign-in successful:', result.user.uid);
+      
+      // The createUserProfile function will be called automatically via onAuthStateChanged
+      // but we can also call it here to ensure immediate profile creation
+      await createUserProfile(result.user);
+    } catch (error: any) {
+      console.error('Google Sign-In Error Details:', {
+        code: error.code,
+        message: error.message,
+        details: error
+      });
+      throw error;
+    }
+  };
+
   const logout = async () => {
     await signOut(auth);
     setUserProfile(null);
@@ -137,6 +158,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     signUp,
     signIn,
+    signInWithGoogle,
     logout,
   };
 
