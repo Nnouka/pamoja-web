@@ -318,6 +318,74 @@ export const getUserChallengeHistory = async (userId: string): Promise<(Challeng
   return challengeHistory;
 };
 
+export const getUserChallengeStatistics = async (userId: string): Promise<{
+  totalCompleted: number;
+  completedToday: number;
+  averageScore: number;
+  totalAttempts: number;
+}> => {
+  try {
+    // Get all challenge progress for the user
+    const progressQuery = query(
+      collection(db, 'challengeProgress'),
+      where('userId', '==', userId)
+    );
+    
+    const progressSnapshot = await getDocs(progressQuery);
+    const allProgress = progressSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as ChallengeProgress[];
+    
+    // Calculate statistics
+    let totalCompleted = 0;
+    let completedToday = 0;
+    let totalCorrectAnswers = 0;
+    let totalAttempts = 0;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    allProgress.forEach(progress => {
+      if (progress.attempts && progress.attempts.length > 0) {
+        totalAttempts += progress.attempts.length;
+        
+        // Count correct answers
+        const correctAnswers = progress.attempts.filter(attempt => attempt.correct).length;
+        totalCorrectAnswers += correctAnswers;
+        
+        // Check if completed (mastered or has correct answers)
+        if (progress.mastered || correctAnswers > 0) {
+          totalCompleted++;
+          
+          // Check if completed today
+          const lastAttempt = progress.attempts[progress.attempts.length - 1];
+          if (lastAttempt && lastAttempt.timestamp.toDate() >= today) {
+            completedToday++;
+          }
+        }
+      }
+    });
+    
+    const averageScore = totalAttempts > 0 ? Math.round((totalCorrectAnswers / totalAttempts) * 100) : 0;
+    
+    return {
+      totalCompleted,
+      completedToday,
+      averageScore,
+      totalAttempts
+    };
+  } catch (error) {
+    console.error('Error getting challenge statistics:', error);
+    return {
+      totalCompleted: 0,
+      completedToday: 0,
+      averageScore: 0,
+      totalAttempts: 0
+    };
+  }
+};
+
 // Get user's challenge history grouped by notes
 export const getUserChallengeHistoryByNotes = async (userId: string): Promise<{ [noteId: string]: { note: Note; challenges: (Challenge & { progress?: ChallengeProgress })[] } }> => {
   // Get challenge history

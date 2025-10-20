@@ -6,7 +6,7 @@ import { ProtectedRoute } from '@/components/protected-route';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, CheckCircle, XCircle, Clock, Trophy, Target } from 'lucide-react';
+import { ArrowLeft, CheckCircle, XCircle, Clock, Trophy, Target, TrendingUp, Calendar, Award } from 'lucide-react';
 import { 
   getUserDueChallenges, 
   getChallengeProgress, 
@@ -14,7 +14,8 @@ import {
   updateChallengeProgress,
   updateUserProfile,
   updateDailyProgress,
-  updateUserStreak 
+  updateUserStreak,
+  getUserChallengeStatistics
 } from '@/lib/database';
 import { 
   calculateNextReview, 
@@ -48,6 +49,12 @@ function ChallengesContent() {
     xpEarned: 0
   });
   const [startTime, setStartTime] = useState<Date>(new Date());
+  const [challengesSummary, setChallengesSummary] = useState({
+    totalChallenges: 0,
+    completedToday: 0,
+    averageScore: 0,
+    currentStreak: 0
+  });
 
   useEffect(() => {
     if (currentUser?.uid) {
@@ -66,10 +73,38 @@ function ChallengesContent() {
       console.log('Challenges page: Found challenges:', dueChallenges.length);
       setChallenges(dueChallenges);
       setStartTime(new Date());
+      
+      // Load summary data
+      await loadChallengesSummary();
     } catch (error) {
       console.error('Error loading challenges:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadChallengesSummary = async () => {
+    if (!currentUser?.uid || !userProfile) return;
+    
+    try {
+      // Get real challenge statistics from database
+      const stats = await getUserChallengeStatistics(currentUser.uid);
+      
+      setChallengesSummary({
+        totalChallenges: stats.totalCompleted,
+        completedToday: stats.completedToday,
+        averageScore: stats.averageScore,
+        currentStreak: userProfile.streak || 0
+      });
+    } catch (error) {
+      console.error('Error loading challenges summary:', error);
+      // Fallback to default values
+      setChallengesSummary({
+        totalChallenges: 0,
+        completedToday: 0,
+        averageScore: 0,
+        currentStreak: userProfile.streak || 0
+      });
     }
   };
 
@@ -338,31 +373,65 @@ function ChallengesContent() {
                 </Link>
                 <h1 className="text-2xl font-bold text-gray-900">Practice Challenges</h1>
               </div>
-              <Link href="/history">
-                <Button variant="outline" size="sm">
-                  <Clock className="h-4 w-4 mr-2" />
-                  View History
-                </Button>
-              </Link>
             </div>
           </div>
         </header>
 
         <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <Card>
-            <CardContent className="text-center py-12">
-              <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No challenges available</h3>
-              <p className="text-gray-500 mb-6">
-                Upload some notes and generate challenges to start practicing!
-              </p>
-              <div className="space-x-4">
-                <Link href="/upload">
-                  <Button variant="primary">Upload Notes</Button>
+          {/* Challenges Summary */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Trophy className="h-5 w-5 mr-2 text-yellow-500" />
+                Your Challenge Progress
+              </CardTitle>
+              <CardDescription>
+                Keep practicing to improve your learning!
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-blue-600">{challengesSummary.totalChallenges}</div>
+                  <div className="text-sm text-gray-500">Total Completed</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-600">{challengesSummary.completedToday}</div>
+                  <div className="text-sm text-gray-500">Today</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-purple-600">{challengesSummary.averageScore}%</div>
+                  <div className="text-sm text-gray-500">Avg Score</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-orange-600">{challengesSummary.currentStreak}</div>
+                  <div className="text-sm text-gray-500">Day Streak</div>
+                </div>
+              </div>
+              
+              <div className="flex justify-center mb-4">
+                <Link href="/history">
+                  <Button variant="outline" className="mr-4">
+                    <Clock className="h-4 w-4 mr-2" />
+                    View History
+                  </Button>
                 </Link>
-                <Link href="/notes">
-                  <Button variant="outline">View My Notes</Button>
-                </Link>
+              </div>
+
+              <div className="text-center">
+                <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No challenges available right now</h3>
+                <p className="text-gray-500 mb-6">
+                  Upload some notes and generate challenges to start practicing!
+                </p>
+                <div className="space-x-4">
+                  <Link href="/upload">
+                    <Button variant="primary">Upload Notes</Button>
+                  </Link>
+                  <Link href="/notes">
+                    <Button variant="outline">View My Notes</Button>
+                  </Link>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -391,12 +460,6 @@ function ChallengesContent() {
                 <Trophy className="h-4 w-4 mr-1" />
                 {sessionStats.xpEarned} XP
               </div>
-              <Link href="/history">
-                <Button variant="outline" size="sm">
-                  <Clock className="h-4 w-4 mr-2" />
-                  History
-                </Button>
-              </Link>
             </div>
           </div>
         </div>
@@ -495,6 +558,18 @@ function ChallengesContent() {
               )}
             </CardContent>
           </Card>
+        )}
+        
+        {/* Quick Actions */}
+        {challenges.length > 0 && (
+          <div className="mt-6 text-center">
+            <Link href="/history">
+              <Button variant="outline">
+                <Clock className="h-4 w-4 mr-2" />
+                View Challenge History
+              </Button>
+            </Link>
+          </div>
         )}
       </main>
 
